@@ -1,0 +1,35 @@
+name: SonarQube Scan
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  sonarqube:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt || true
+      - name: SonarQube Scan
+        uses: SonarSource/sonarcloud-github-action@v2
+        with:
+          args: >
+            -Dsonar.projectKey=api-backend
+            -Dsonar.host.url=${{ secrets.SONAR_HOST_URL }}
+            -Dsonar.login=${{ secrets.SONAR_TOKEN }}
+      - name: Set version env
+        run: |
+          if [[ "$GITHUB_REF" == refs/tags/* ]]; then
+            echo "API_VERSION=${GITHUB_REF##*/}" >> $GITHUB_ENV
+          else
+            echo "API_VERSION=dev-${GITHUB_RUN_ID}" >> $GITHUB_ENV
+          fi

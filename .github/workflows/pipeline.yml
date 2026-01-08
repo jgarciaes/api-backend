@@ -24,8 +24,17 @@ jobs:
     runs-on:
       group: projects-poc
       labels: [self-hosted, ubuntu-22, project-runner]
+    outputs:
+      version: ${{ steps.get-version.outputs.version }}
     steps:
       - uses: actions/checkout@v4
+      
+      - name: Get version from VERSION file
+        id: get-version
+        run: |
+          VERSION=$(cat VERSION)
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "Application version: $VERSION"
       
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -64,3 +73,20 @@ jobs:
             -Dsonar.projectKey=api-backend
             -Dsonar.host.url=${{ env.SONAR_HOST_URL }}
             -Dsonar.login=${{ env.SONAR_TOKEN }}
+
+  docker:
+    name: Docker Build & Push
+    needs: [build, code-quality]
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    uses: ./.github/workflows/docker-build-push.yml
+    with:
+      app-name: api-backend
+      app-version: ${{ needs.build.outputs.version }}
+      dockerfile-path: ./Dockerfile
+      build-context: .
+    secrets:
+      AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+      AWS_ACCOUNT_ID: ${{ secrets.AWS_ACCOUNT_ID }}
+      AWS_REGION: ${{ secrets.AWS_REGION }}
+      ECR_REPOSITORY: ${{ secrets.ECR_REPOSITORY }}

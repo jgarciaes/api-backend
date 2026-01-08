@@ -1,28 +1,47 @@
 name: CI/CD Pipeline
 
 permissions:
-  contents: read
+  contents: write
 
 on:
   push:
     branches: [ main ]
     paths-ignore:
       - '.github/workflows/security.yml'
-      - '.github/workflows/release.yml'
       - 'docs/**'
-    tags:
-      - 'v*.*.*'  # Trigger on version tags (v1.0.0, v2.1.3, etc)
   pull_request:
     branches: [ main ]
     paths-ignore:
       - '.github/workflows/security.yml'
-      - '.github/workflows/release.yml'
       - 'docs/**'
   workflow_dispatch:
+    inputs:
+      release-type:
+        description: 'Release type (auto, major, minor, patch)'
+        required: false
+        type: choice
+        options:
+          - auto
+          - major
+          - minor
+          - patch
+        default: 'auto'
 
 jobs:
+  release:
+    name: Release Management
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    uses: project-poc-org/reusable-workflows/.github/workflows/release.yml@v1.1.0
+    permissions:
+      contents: write
+      pull-requests: write
+    with:
+      release-type: ${{ github.event.inputs.release-type || 'auto' }}
+
   build:
     name: Build & Test
+    needs: [release]
+    if: always()
     runs-on:
       group: projects-poc
       labels: [self-hosted, ubuntu-22, project-runner]
@@ -30,6 +49,8 @@ jobs:
       version: ${{ steps.get-version.outputs.version }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: main
       
       - name: Get version from VERSION file
         id: get-version

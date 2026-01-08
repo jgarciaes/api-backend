@@ -10,8 +10,8 @@ on:
 jobs:
   sonarqube:
     runs-on:
-      group: default
-      labels: [self-hosted, Linux, X64]
+      group: projects-poc
+      labels: [self-hosted, ubuntu-22, project-runner]
     env:
       SONAR_HOST_URL: ${{ secrets.SONAR_HOST_URL }}
       SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}

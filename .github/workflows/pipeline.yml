@@ -83,7 +83,7 @@ jobs:
     name: Docker Build & Push
     needs: [build, code-quality]
     if: github.ref == 'refs/heads/main' && github.event_name == 'push'
-    uses: ./.github/workflows/docker-build-push.yml
+    uses: project-poc-org/reusable-workflows/.github/workflows/docker-build-push.yml@v1.0.0
     with:
       app-name: api-backend
       app-version: ${{ needs.build.outputs.version }}

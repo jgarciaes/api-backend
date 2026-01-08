@@ -1,0 +1,203 @@
+name: Release Management
+
+permissions:
+  contents: write
+  pull-requests: write
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+    inputs:
+      release-type:
+        description: 'Release type (major, minor, patch, alpha, beta, rc)'
+        required: true
+        type: choice
+        options:
+          - auto
+          - major
+          - minor
+          - patch
+          - alpha
+          - beta
+          - rc
+
+jobs:
+  analyze-commits:
+    name: Analyze Commits & Determine Version
+    runs-on:
+      group: projects-poc
+    outputs:
+      should-release: ${{ steps.analyze.outputs.should-release }}
+      version-bump: ${{ steps.analyze.outputs.version-bump }}
+      new-version: ${{ steps.analyze.outputs.new-version }}
+      release-notes: ${{ steps.analyze.outputs.release-notes }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # Full history for commit analysis
+
+      - name: Get current version
+        id: current-version
+        run: |
+          CURRENT_VERSION=$(cat VERSION)
+          echo "current=$CURRENT_VERSION" >> $GITHUB_OUTPUT
+          echo "Current version: $CURRENT_VERSION"
+
+      - name: Analyze commits for version bump
+        id: analyze
+        env:
+          CURRENT_VERSION: ${{ steps.current-version.outputs.current }}
+          MANUAL_RELEASE: ${{ github.event.inputs.release-type }}
+        run: |
+          # Get last tag or first commit
+          LAST_TAG=$(git describe --tags --abbrev=0 2>/dev/null || git rev-list --max-parents=0 HEAD)
+          echo "Last tag: $LAST_TAG"
+          
+          # Get commits since last tag
+          COMMITS=$(git log $LAST_TAG..HEAD --pretty=format:"%s")
+          echo "Commits since last release:"
+          echo "$COMMITS"
+          
+          # Initialize flags
+          HAS_BREAKING=false
+          HAS_FEAT=false
+          HAS_FIX=false
+          
+          # Analyze commit messages
+          while IFS= read -r commit; do
+            if [[ "$commit" =~ ^(feat|fix|perf|refactor).*!:|BREAKING[[:space:]]CHANGE ]]; then
+              HAS_BREAKING=true
+            elif [[ "$commit" =~ ^feat(\(.*\))?: ]]; then
+              HAS_FEAT=true
+            elif [[ "$commit" =~ ^fix(\(.*\))?: ]]; then
+              HAS_FIX=true
+            fi
+          done <<< "$COMMITS"
+          
+          # Determine version bump
+          if [[ "$MANUAL_RELEASE" != "auto" && "$MANUAL_RELEASE" != "" ]]; then
+            BUMP=$MANUAL_RELEASE
+          elif [[ "$HAS_BREAKING" == "true" ]]; then
+            BUMP="major"
+          elif [[ "$HAS_FEAT" == "true" ]]; then
+            BUMP="minor"
+          elif [[ "$HAS_FIX" == "true" ]]; then
+            BUMP="patch"
+          else
+            BUMP="none"
+          fi
+          
+          echo "Version bump type: $BUMP"
+          
+          # Calculate new version
+          IFS='.' read -r MAJOR MINOR PATCH <<< "$CURRENT_VERSION"
+          
+          case $BUMP in
+            major)
+              NEW_VERSION="$((MAJOR + 1)).0.0"
+              SHOULD_RELEASE=true
+              ;;
+            minor)
+              NEW_VERSION="$MAJOR.$((MINOR + 1)).0"
+              SHOULD_RELEASE=true
+              ;;
+            patch)
+              NEW_VERSION="$MAJOR.$MINOR.$((PATCH + 1))"
+              SHOULD_RELEASE=true
+              ;;
+            alpha)
+              NEW_VERSION="$MAJOR.$((MINOR + 1)).0-alpha.$(date +%s)"
+              SHOULD_RELEASE=true
+              ;;
+            beta)
+              NEW_VERSION="$MAJOR.$((MINOR + 1)).0-beta.$(date +%s)"
+              SHOULD_RELEASE=true
+              ;;
+            rc)
+              NEW_VERSION="$MAJOR.$((MINOR + 1)).0-rc.$(date +%s)"
+              SHOULD_RELEASE=true
+              ;;
+            none)
+              NEW_VERSION="$CURRENT_VERSION"
+              SHOULD_RELEASE=false
+              ;;
+          esac
+          
+          echo "New version: $NEW_VERSION"
+          echo "should-release=$SHOULD_RELEASE" >> $GITHUB_OUTPUT
+          echo "version-bump=$BUMP" >> $GITHUB_OUTPUT
+          echo "new-version=$NEW_VERSION" >> $GITHUB_OUTPUT
+          
+          # Generate release notes
+          NOTES=$(git log $LAST_TAG..HEAD --pretty=format:"- %s (%h)" | grep -E "^- (feat|fix|perf|refactor|BREAKING)" || echo "- Maintenance updates")
+          echo "release-notes<<EOF" >> $GITHUB_OUTPUT
+          echo "$NOTES" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+
+  create-release:
+    name: Create Release & Update Version
+    needs: analyze-commits
+    if: needs.analyze-commits.outputs.should-release == 'true'
+    runs-on:
+      group: projects-poc
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Update VERSION file
+        env:
+          NEW_VERSION: ${{ needs.analyze-commits.outputs.new-version }}
+        run: |
+          echo "$NEW_VERSION" > VERSION
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add VERSION
+          git commit -m "chore(release): bump version to $NEW_VERSION [skip ci]"
+          git push origin main
+
+      - name: Create Git tag
+        env:
+          NEW_VERSION: ${{ needs.analyze-commits.outputs.new-version }}
+        run: |
+          git tag -a "v$NEW_VERSION" -m "Release v$NEW_VERSION"
+          git push origin "v$NEW_VERSION"
+
+      - name: Create GitHub Release
+        uses: actions/github-script@v7
+        env:
+          NEW_VERSION: ${{ needs.analyze-commits.outputs.new-version }}
+          BUMP_TYPE: ${{ needs.analyze-commits.outputs.version-bump }}
+          NOTES: ${{ needs.analyze-commits.outputs.release-notes }}
+        with:
+          script: |
+            const { NEW_VERSION, BUMP_TYPE, NOTES } = process.env;
+            const isPreRelease = NEW_VERSION.includes('-');
+            
+            const release = await github.rest.repos.createRelease({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              tag_name: `v${NEW_VERSION}`,
+              name: `Release v${NEW_VERSION}`,
+              body: `## Release Notes\n\n**Version bump:** ${BUMP_TYPE}\n\n### Changes\n${NOTES}`,
+              draft: false,
+              prerelease: isPreRelease
+            });
+            
+            core.info(`Created release: ${release.data.html_url}`);
+
+      - name: Summary
+        env:
+          NEW_VERSION: ${{ needs.analyze-commits.outputs.new-version }}
+          BUMP_TYPE: ${{ needs.analyze-commits.outputs.version-bump }}
+        run: |
+          echo "## 🚀 Release Created" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Version:** v$NEW_VERSION" >> $GITHUB_STEP_SUMMARY
+          echo "**Type:** $BUMP_TYPE" >> $GITHUB_STEP_SUMMARY
+          echo "**Tag:** \`v$NEW_VERSION\`" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "Docker images will be built by the main CI/CD pipeline." >> $GITHUB_STEP_SUMMARY

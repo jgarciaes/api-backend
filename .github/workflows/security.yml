@@ -1,0 +1,64 @@
+name: Security Scanning
+
+permissions:
+  contents: read
+  security-events: write
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+  schedule:
+    - cron: '0 2 * * 1'  # Weekly on Monday at 2am
+  workflow_dispatch:
+
+jobs:
+  security:
+    name: Security Analysis
+    runs-on:
+      group: projects-poc
+      labels: [self-hosted, ubuntu-22, project-runner]
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Clean up previous artifacts
+        run: |
+          rm -rf trivy-results.sarif checkov-results.sarif checkov-report || true
+          find . -name 'trivy-results.sarif' -delete || true
+          find . -name 'checkov-report' -type d -exec rm -rf {} + || true
+      
+      - name: Trivy vulnerability scanner
+        uses: aquasecurity/trivy-action@0.31.0
+        with:
+          scan-type: 'fs'
+          scan-ref: '.'
+          format: 'sarif'
+          output: 'trivy-results.sarif'
+      
+      - name: Upload Trivy results to GitHub Security
+        uses: github/codeql-action/upload-sarif@v4
+        if: always()
+        with:
+          sarif_file: 'trivy-results.sarif'
+          category: 'trivy'
+      
+      - name: Checkov scan
+        uses: bridgecrewio/checkov-action@v12
+        with:
+          directory: .
+          framework: all
+          soft_fail: true
+          output_format: sarif
+          output_file_path: ./checkov-report
+      
+      - name: Fix Checkov output permissions
+        if: always()
+        run: sudo chown -R actions-runner:actions-runner ./checkov-report || true
+      
+      - name: Upload Checkov results to GitHub Security
+        uses: github/codeql-action/upload-sarif@v4
+        if: always()
+        with:
+          sarif_file: './checkov-report/results_sarif.sarif'
+          category: 'checkov'

@@ -11,7 +11,7 @@ jobs:
   sonarqube:
     runs-on:
       group: projects-poc
-      labels: [self-hosted, ubuntu-22, project-runner]
+      labels: [ project-runner]
     env:
       SONAR_HOST_URL: ${{ secrets.SONAR_HOST_URL }}
       SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}

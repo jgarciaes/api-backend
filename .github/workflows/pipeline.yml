@@ -31,7 +31,7 @@ jobs:
   release:
     name: Release Management
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    uses: project-poc-org/reusable-workflows/.github/workflows/release.yml@v1.1.0
+    uses: project-poc-org/reusable-workflows/.github/workflows/release.yml@v1.2.0
     permissions:
       contents: write
       pull-requests: write

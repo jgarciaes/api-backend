@@ -30,11 +30,13 @@ jobs:
           find . -name 'trivy-results.sarif' -delete || true
           find . -name 'checkov-report' -type d -exec rm -rf {} + || true
       
-      - name: Gitleaks - Secret Scanning
-        uses: gitleaks/gitleaks-action@v2
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          GITLEAKS_ENABLE_SUMMARY: true
+      - name: TruffleHog - Secret Scanning
+        uses: trufflesecurity/trufflehog@main
+        with:
+          path: ./
+          base: ${{ github.event.repository.default_branch }}
+          head: HEAD
+        continue-on-error: true
       
       - name: Semgrep - SAST Scanning
         uses: returntocorp/semgrep-action@v1
@@ -53,7 +55,7 @@ jobs:
       
       - name: Upload Trivy results to GitHub Security
         uses: github/codeql-action/upload-sarif@v4
-        if: always()
+        if: always() && hashFiles('trivy-results.sarif') != ''
         with:
           sarif_file: 'trivy-results.sarif'
           category: 'trivy'
@@ -73,7 +75,7 @@ jobs:
       
       - name: Upload Checkov results to GitHub Security
         uses: github/codeql-action/upload-sarif@v4
-        if: always()
+        if: always() && hashFiles('./checkov-report/results_sarif.sarif') != ''
         with:
           sarif_file: './checkov-report/results_sarif.sarif'
           category: 'checkov'

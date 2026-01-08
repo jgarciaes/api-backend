@@ -21,12 +21,27 @@ jobs:
       labels: [self-hosted, ubuntu-22, project-runner]
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       
       - name: Clean up previous artifacts
         run: |
           rm -rf trivy-results.sarif checkov-results.sarif checkov-report || true
           find . -name 'trivy-results.sarif' -delete || true
           find . -name 'checkov-report' -type d -exec rm -rf {} + || true
+      
+      - name: Gitleaks - Secret Scanning
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITLEAKS_ENABLE_SUMMARY: true
+      
+      - name: Semgrep - SAST Scanning
+        uses: returntocorp/semgrep-action@v1
+        with:
+          config: auto
+          publishToken: ${{ secrets.SEMGREP_APP_TOKEN }}
+        continue-on-error: true
       
       - name: Trivy vulnerability scanner
         uses: aquasecurity/trivy-action@0.31.0
